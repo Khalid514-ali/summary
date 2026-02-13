@@ -3,60 +3,48 @@ import requests
 from bs4 import BeautifulSoup
 from transformers import pipeline
 
+# Title
 st.title("Professional Website URL Summarizer")
 
-# Load model
+# 1. Loading the model correctly
 @st.cache_resource
 def load_model():
+    # Adding device_map="auto" helps the library manage resources better
     return pipeline("summarization", model="facebook/bart-large-cnn")
 
-summarizer = load_model()
+try:
+    summarizer = load_model()
+except Exception as e:
+    st.error(f"Model failed to load: {e}")
 
-# Extract main article text
+# 2. Extract text logic
 def extract_text(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    article = soup.find("article")
-
-    if article:
-        paragraphs = article.find_all("p")
-    else:
-        paragraphs = soup.find_all("p")
-
-    text = " ".join([p.get_text() for p in paragraphs])
-    return text
-
-
-# Chunk summarization
-def summarize_long_text(text):
-    max_chunk = 1000
-    chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
-
-    summaries = []
-
-    for chunk in chunks:
-        summary = summarizer(chunk, max_length=120, min_length=40, do_sample=False)
-        summaries.append(summary[0]["summary_text"])
-
-    final_summary = " ".join(summaries)
-    return final_summary
-
-
-url = st.text_input("Enter website URL")
-
-if st.button("Summarize"):
-    if url == "":
-        st.warning("Enter a valid URL")
-    else:
-        with st.spinner("Extracting article..."):
-            article = extract_text(url)
-
-        if len(article) == 0:
-            st.error("No content extracted")
+    try:
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        
+        # Look for article tag first, then fallback to all paragraphs
+        article = soup.find("article")
+        if article:
+            paragraphs = article.find_all("p")
         else:
-            with st.spinner("Generating summary..."):
-                final_summary = summarize_long_text(article)
+            paragraphs = soup.find_all("p")
+            
+        text = " ".join([p.get_text() for p in paragraphs])
+        return text
+    except Exception as e:
+        return None
 
+# 3. UI logic
+url_input = st.text_input("Enter Website URL:")
+
+if url_input:
+    with st.spinner("Processing..."):
+        content = extract_text(url_input)
+        if content:
+            # BART has a limit of 1024 tokens
+            summary = summarizer(content[:1024], max_length=130, min_length=30, do_sample=False)
             st.subheader("Summary")
-            st.write(final_summary)
+            st.success(summary[0]['summary_text'])
+        else:
+            st.error("Could not retrieve text from the URL.")
